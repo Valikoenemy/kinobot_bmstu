@@ -12,6 +12,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+# from aiogram.types import FSInputFile
 from datetime import datetime
 
 
@@ -21,6 +22,7 @@ class GameRegistration(StatesGroup):
     team_size = State()
     team_name = State()
     game_confirm = State()
+    game_approval = State()
 
 
 class MovieRegistration(StatesGroup):
@@ -28,6 +30,7 @@ class MovieRegistration(StatesGroup):
     movie_name = State()
     movie_group_number = State()
     movie_confirm = State()
+    movie_approval = State()
 
 
 class TripRegistration(StatesGroup):
@@ -39,6 +42,7 @@ class TripRegistration(StatesGroup):
     trip_illness = State()
     trip_special = State()
     trip_confirm = State()
+    trip_approval = State()
 
 router = Router()
 
@@ -53,6 +57,7 @@ client = gspread.authorize(creds)
 
 workbook = client.open("КиношкиРега")
 game_sheet = workbook.worksheet("ЛистКиноигра")
+game_sheet2 = workbook.worksheet("ИграЛистОжидания")  # лист ожидания
 movie_sheet = workbook.worksheet("ЛистКиновечер")
 trip_sheet = workbook.worksheet("ЛистВыезд")
 # game_sheet.append_row(["Имя", "Команда", "Количество", "@username"])
@@ -65,11 +70,26 @@ events_sheet = workbook.worksheet("Мероприятия")
 
 
 
+def get_event_by_name(name: str):
+    events = events_sheet.get_all_records()
+    return next((e for e in events if e["Название"] == name), None)
+
+
+def is_user_registered(sheet, user_id):
+    records = sheet.get_all_records()
+    return any(str(r.get("user_id")) == str(user_id) for r in records)
+
+
+def append_row(sheet, row):
+    sheet.append_row(row)
+
+
 def get_1game_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_game")]
+            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_game")],
+            [InlineKeyboardButton(text="Правила на Киноигре", callback_data="game_rules")]
         ]
     )
     return keyboard
@@ -127,6 +147,7 @@ async def law_game_registration(callback: CallbackQuery):
 
 @router.callback_query(F.data == "game_FSM")
 async def start_game_registration(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(game_approval="да")
     await callback.message.delete()
     await callback.message.answer("Все ли члены команды являются студентами МГТУ им. Н.Э. Баумана?\n\n"
                                   "Ответь 'да' или 'нет'.")
@@ -186,7 +207,6 @@ async def get_team_name(message: Message, state: FSMContext):
         f"👥 Кол-во участников: {data['team_size']}\n"
         f"🏷 Название команды: {data['team_name']}"
     )
-
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Начать заново", callback_data="game_restart")],
@@ -194,7 +214,6 @@ async def get_team_name(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="Отменить", callback_data="denied")]
         ]
     )
-
     await message.answer(summary, reply_markup=keyboard)
     await state.set_state(GameRegistration.game_confirm)
 
@@ -202,49 +221,87 @@ async def get_team_name(message: Message, state: FSMContext):
 @router.callback_query(F.data == "game_confirm")
 async def confirm_registration(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    await callback.message.delete()
-    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Киноигре!</b> 🎉",
-                                  reply_markup=back_to_the_start(),
-                                  parse_mode='HTML')
+    user_id = callback.from_user.id
     username = callback.from_user.username or "без username"
-    game_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
-
-    row = [str(data['game_name']),
-           str(data['team_size']),
-           str(data['team_name']),
-           f"@{username}",
-           game_timestamp,
-           str(callback.from_user.id),
-           str(data['game_bauman'])]
-
-    print("Row:", row)
-    print("Sheet:", game_sheet)
-    print("FSM data:", data)
-
-    try:
-        game_sheet.append_row(row)
-    except Exception as e:
-        await callback.message.answer(f"Ошибка при записи в таблицу: {e}")
-
-    await callback.message.delete()
-    await state.clear()
+    timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+    event = get_event_by_name("Киноигра")
+    if not event:
+        await callback.message.answer("Ошибка: событие не найдено.",
+                                      reply_markup=back_to_the_start())
+        return
+    # проверка на повторную регу
+    if is_user_registered(game_sheet, user_id):
+        await callback.message.delete()
+        await callback.message.answer("Вы уже зарегистрированы в основном списке.",
+                                      reply_markup=back_to_the_start())
+        return
     await callback.answer()
 
-
-@router.callback_query(F.data == "denied")
-async def denied_registration(callback: CallbackQuery, state: FSMContext):
-    await callback.message.delete()
-    await callback.message.answer("❌ Регистрация отменена! Подумаем еще раз?",
-                                  reply_markup=back_to_the_start())
-    await state.clear()
+    if is_user_registered(game_sheet2, user_id):
+        await callback.message.delete()
+        await callback.message.answer("Вы уже находитесь в листе ожидания.",
+                                      reply_markup=back_to_the_start())
+        return
     await callback.answer()
+
+    # считаем количество команд
+    main_records = game_sheet.get_all_records()
+    count = len(main_records)
+    limit = int(event["Лимит"])
+    row = [
+        data['game_name'],
+        data['team_size'],
+        data['team_name'],
+        f"@{username}",
+        timestamp,
+        user_id,
+        data['game_bauman'],
+        data['game_approval']
+    ]
+    # основной лист
+    if count < limit:
+        append_row(game_sheet, row)
+        await callback.message.delete()
+        await callback.message.answer(
+            "✅ Регистрация завершена! <b>Увидимся на Киноигре!</b> 🎉",
+            reply_markup=back_to_the_start(),
+            parse_mode='HTML'
+        )
+        await state.clear()
+        await callback.answer()
+    else:
+        # лист ожидания
+        game_sheet2.append_row([
+            data['game_name'], data['team_size'], data['team_name'],
+            f"@{username}", timestamp, user_id, data['game_bauman'], data['game_approval']
+        ])
+        await callback.message.delete()
+        await callback.message.answer(
+            "⚠️ Основные места заняты.\n"
+            "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n"
+            "<b>Не спешите расстраиваться!</b>\n"
+            "После закрытия регистрации мы начнём собирать подтверждения, "
+            "как правило некоторые команды отказываются от участия, в таком случае мы свяжемся с Вами "
+            "и если Вы будете согласны, то займёте их место\n\n"
+            "Благодарим за понимание!🙏",
+            parse_mode="HTML",
+            reply_markup=back_to_the_start()
+        )
+        await state.clear()
+        await callback.answer()
 
 
 @router.callback_query(F.data == "game_restart")
-async def restart_registration(callback: CallbackQuery, state: FSMContext):
+async def law_game_registration(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.message.delete()
-    await callback.message.answer("Хорошо, начнём заново.\n\nВаше имя и фамилия, Капитан?")
-    await state.set_state(GameRegistration.game_name)
+    await callback.message.answer("Хорошо, давай начнём заново\n\n"
+                                  "И снова формальность.\n"
+                                  "Нам нужно твоё <b>согласие</b> на обработку персональных данных"
+                                  " в соответствии с Федеральным законом от 27.07.2006 №152-ФЗ"
+                                  " «О персональных данных». ",
+                                  parse_mode="HTML",
+                                  reply_markup=agree_game_keyboard())
     await callback.answer()
 
 
@@ -254,12 +311,13 @@ async def notify_game(message: Message):
 
     game = next((e for e in events if e["Название"] == "Киноигра"), None)
     if not game or game["Доступно"].lower() != "да":
-        await message.answer("❌ Киновечер недоступен для рассылки.")
+        await message.answer("❌ Киноигра недоступна для рассылки.")
         return
 
-    date = game["Дата"]
+    date = game["Дата_начало"]
     time = game["Время"]
     place = game["Место"]
+    # remember = game["Не забудьте"]
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Подтвердить ✅", callback_data="game_confirm_yes")],
@@ -275,12 +333,13 @@ async def notify_game(message: Message):
                 await bot.send_message(
                     int(user_id),
                     (
-                        f"🎬 Напоминаем: Киноигра состоится {date} в {time} в {place}!\n"
+                        f"🎬 Напоминаем: <b>Киноигра</b> состоится {date} в {time} в {place}!\n"
                         f"Подтверждаете ли Вы свою регистрацию? 👇\n\n"
                         f"(Если придёте, но есть изменения,"
-                        f"то нажмите кнопку подтвердить и обязательно напишите о них @planb_on_fire)\n"
+                        f"то <b>обязательно</b> напишите о них @planb_on_fire, a после нажмите кнопку подтвердить)\n"
                     ),
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
                 )
                 sent_count += 1
                 await asyncio.sleep(0.5)
@@ -296,7 +355,7 @@ async def confirm_game(callback: CallbackQuery):
 
     for i, row in enumerate(rows, start=2):
         if str(row.get("user_id")) == str(user_id):
-            game_sheet.update_cell(i, 8, "✅ Подтверждено")
+            game_sheet.update_cell(i, 9, "✅ Подтверждено")
             break
 
     await callback.message.answer("✅ Вы подтвердили участие в Киноигре!")
@@ -310,7 +369,7 @@ async def cancel_game(callback: CallbackQuery):
 
     for i, row in enumerate(rows, start=2):
         if str(row.get("user_id")) == str(user_id):
-            game_sheet.update_cell(i, 8, "❌ Отменено")
+            game_sheet.update_cell(i, 9, "❌ Отменено")
             break
 
     await callback.message.answer("❌ Вы отменили участие в киноигре.")
@@ -326,7 +385,8 @@ def get_1movie_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_movie")]
+            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_movie")],
+            [InlineKeyboardButton(text="Правила на Киновечере", callback_data="movie_rules")]
         ]
     )
     return keyboard
@@ -385,6 +445,7 @@ async def law_movie_registration(callback: CallbackQuery):
 @router.callback_query(F.data == "movie_FSM")
 async def start_movie_registration(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
+    await state.update_data(movie_approval="да")
     await callback.message.answer("Являешься ли ты студентом(-кой) МГТУ им. Н.Э. Баумана?\n\n"
                                   "<i>Ответь 'да' или 'нет'.</i>",
                                   parse_mode='HTML')
@@ -446,8 +507,20 @@ async def get_movie_sum(message: Message, state: FSMContext):
 async def confirm_movie_registration(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     await callback.message.delete()
-    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Киновечере!</b> 🎉",
-                                  reply_markup=back_to_the_start(),
+
+    events = events_sheet.get_all_records()
+    movie = next((e for e in events if e["Название"] == "Киновечер"), None)
+    group_link = movie["Ссылка на группу"]
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link)],
+            [InlineKeyboardButton(text="Назад!", callback_data="start")]
+        ]
+    )
+
+    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Киновечере!</b> 🎉\n\n "
+                                  "Переходи в группу, чтобы быть в курсе всей информации по мероприятию!👇",
+                                  reply_markup=keyboard,
                                   parse_mode='HTML')
     username = callback.from_user.username or "без username"
     movie_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -457,7 +530,8 @@ async def confirm_movie_registration(callback: CallbackQuery, state: FSMContext)
            f"@{username}",
            movie_timestamp,
            str(callback.from_user.id),
-           str(data['movie_bauman'])]
+           str(data['movie_bauman']),
+           str(data['game_approval'])]
 
     print("Row:", row)
     print("Sheet:", movie_sheet)
@@ -474,10 +548,16 @@ async def confirm_movie_registration(callback: CallbackQuery, state: FSMContext)
 
 
 @router.callback_query(F.data == "movie_restart")
-async def restart_movie_registration(callback: CallbackQuery, state: FSMContext):
+async def law_movie_registration(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.message.delete()
-    await callback.message.answer("Хорошо, начнём заново.\n\nТвои имя и фамилия:")
-    await state.set_state(MovieRegistration.movie_name)
+    await callback.message.answer("Хорошо, давай начнём заново\n\n"
+                                  "И снова формальность.\n"
+                                  "Нам нужно твоё <b>согласие</b> на обработку персональных данных"
+                                  " в соответствии с Федеральным законом от 27.07.2006 №152-ФЗ"
+                                  " «О персональных данных». ",
+                                  parse_mode="HTML",
+                                  reply_markup=agree_movie_keyboard())
     await callback.answer()
 
 
@@ -489,8 +569,8 @@ async def notify_movie(message: Message):
     if not movie or movie["Доступно"].lower() != "да":
         await message.answer("❌ Киновечер недоступен для рассылки.")
         return
-
-    date = movie["Дата"]
+    # remember = movie["Не забудьте"]
+    date = movie["Дата_начало"]
     time = movie["Время"]
     group_link = movie["Ссылка на группу"]
 
@@ -509,9 +589,11 @@ async def notify_movie(message: Message):
             try:
                 await bot.send_message(
                     user_id,
-                    f"🎬 Напоминаем: киновечер состоится {date} в {time}!\n"
-                    f"Присоединяйтесь к группе, далее информация будет там! 👇",
-                    reply_markup=keyboard
+                    f"🎬 Напоминаем: <b>Киновечер</b> состоится {date} в {time}!\n"
+                    f"Присоединяйтесь к группе, если ещё нет, вся информация там! 👇\n\n"
+                    f"<b>P.S. Не забудьте свои карты для прохода в университет</b>",
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
                 )
                 sent_count += 1
                 await asyncio.sleep(0.5)
@@ -591,6 +673,7 @@ async def law_trip_registration(callback: CallbackQuery):
 @router.callback_query(F.data == "trip_FSM")
 async def start_trip_registration(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
+    await state.update_data(trip_approval="да")
     await callback.message.answer("Являешься ли ты студентом(-кой) МГТУ им. Н.Э. Баумана?\n\n"
                                   "<i>Ответь 'да' или 'нет'.</i>",
                                   parse_mode='HTML')
@@ -614,7 +697,7 @@ async def check_student_status_trip(message: Message, state: FSMContext):
             "Вы можете вернуться в начало и выбрать другое действие:",
             reply_markup=back_to_the_start()
         )
-        await state.clear()  # очистка состояния
+        await state.clear()
         return
 
     await state.update_data(trip_bauman=text)
@@ -699,9 +782,19 @@ async def get_trip_sum(message: Message, state: FSMContext):
 @router.callback_query(F.data == "trip_confirm")
 async def confirm_registration(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    events = events_sheet.get_all_records()
+    trip = next((e for e in events if e["Название"] == "Выезд"), None)
+    group_link = trip["Ссылка на группу"]
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Перейти в группу", url=group_link)],
+            [InlineKeyboardButton(text="Назад!", callback_data="start")]
+        ]
+    )
     await callback.message.delete()
-    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉",
-                                  reply_markup=back_to_the_start(),
+    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n"
+                                  "Переходи в группу, чтобы быть в курсе всей информации по выезду!👇",
+                                  reply_markup=keyboard,
                                   parse_mode='HTML')
     username = callback.from_user.username or "без username"
     trip_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -715,7 +808,8 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
            str(data['trip_date_of_birth']),
            str(data['trip_illness']),
            str(data['trip_special']),
-           str(data['trip_bauman'])]
+           str(data['trip_bauman']),
+           str(data['trip_approval'])]
 
     print("Row:", row)
     print("Sheet:", trip_sheet)
@@ -732,10 +826,16 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "trip_restart")
-async def restart_movie_registration(callback: CallbackQuery, state: FSMContext):
+async def law_trip_registration(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.message.delete()
-    await callback.message.answer("Хорошо, начнём заново.\n\nТвои имя и фамилия:")
-    await state.set_state(TripRegistration.trip_name)
+    await callback.message.answer("Хорошо, давай начнём заново\n\n"
+                                  "И снова формальность.\n"
+                                  "Нам нужно твоё <b>согласие</b> на обработку персональных данных"
+                                  " в соответствии с Федеральным законом от 27.07.2006 №152-ФЗ"
+                                  " «О персональных данных». ",
+                                  parse_mode="HTML",
+                                  reply_markup=agree_trip_keyboard())
     await callback.answer()
 
 
@@ -770,7 +870,7 @@ async def notify_trip(message: Message):
                 await bot.send_message(
                     user_id,
                     f"🎬 Напоминаем: Выезд состоится с {date_start} по {date_finish}, сбор в {time} в {place}!\n"
-                    f"Присоединяйтесь к группе, далее информация будет там! 👇",
+                    f"Присоединяйтесь к группе, если ещё нет, вся информация там! 👇",
                     reply_markup=keyboard
                 )
                 sent_count += 1
@@ -794,10 +894,41 @@ async def process_more_info(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "info_game")
 async def process_more_info(callback: CallbackQuery):
     # await callback.message.delete()
-    await callback.message.answer("Киноигра — командный квиз с вопросами по всему, что связано с кино и сериалами!"
-                                  "\n\nКоманды от 4 до 8 человек\n\nВеселимся, отдыхаем, получаем подарки"
-                                  "\n\nP.S. Усердно думаем над рейтингом команд)",
-                                  reply_markup=get_1game_inline_keyboard())
+    await callback.message.answer(
+        "Киноигра — командный квиз с вопросами по всему, что связано с кино и сериалами!"
+        "\n\nКоманды от 4 до 8 человек\n\nВеселимся, отдыхаем, получаем подарки\n\n"
+        "<b>Нажимай на кнопку ниже чтобы узнать правила.</b>"
+        "\n\nP.S. Усердно думаем над рейтингом команд)",
+        reply_markup=get_1game_inline_keyboard(),
+        parse_mode="HTML")
+    await callback.message.delete()
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "game_rules")
+async def process_more_info(callback: CallbackQuery):
+    # await callback.message.delete()
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="info_game")]
+        ]
+    )
+    await callback.message.answer(
+        "Вот основные правила Киноигр:\n\n"
+        "1️⃣Ключевым правилом является — честность. "
+        "За нарушение этого правила: в первый раз делаем предупреждение, "
+        "за дальнейшие подобные действия член команды или вся команда могут быть дисквалифицированы.\n"
+        "Что является нарушением? Звонок другу, смс чат-боту, ну и очевидно, поиск ответа в интернете.\n\n"
+        "2️⃣Чистота и порядок.\n"
+        "Пожалуйста, не мусорьте. Убедитесь, что после окончания мероприятия всё выброшено в урны.\n\n"
+        "3️⃣Бережное отношение к имуществу.\n"
+        "Просьба не крушить и не ломать ничего в помещении. Давайте уважать пространство, в котором находимся.\n\n"
+        "4️⃣Берите с собой шариковую ручку\n\n"
+        "5️⃣Берите с собой хорошее настроение.\n"
+        "Что входит в хорошее настроение? Приколы и позитив, желание хорошо провести время.\n\n"
+        "Спасибо за понимание 💌",
+        reply_markup=keyboard,
+        parse_mode="HTML")
     await callback.message.delete()
     await callback.answer()
 
@@ -806,8 +937,37 @@ async def process_more_info(callback: CallbackQuery):
 async def process_more_info(callback: CallbackQuery):
     await callback.message.answer("Киновечер — смотрим кино на больших экранах прямо в Бауманке.\n"
                                   "Зови своих друзей и подруг на наши уютные вечера с угощениями — "
-                                  "проведём время отлично!",
-                                  reply_markup=get_1movie_inline_keyboard())
+                                  "проведём время отлично!\n\n"
+                                  "<b>Нажимай на кнопку ниже чтобы узнать правила.</b>",
+                                  reply_markup=get_1movie_inline_keyboard(),
+                                  parse_mode="HTML")
+    await callback.message.delete()
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "movie_rules")
+async def process_more_info(callback: CallbackQuery):
+    # await callback.message.delete()
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="info_movie")]
+        ]
+    )
+    await callback.message.answer(
+        "Вот основные правила Киновечера:\n\n"
+        "1️⃣Не заказывать доставку.\n"
+        "Во избежание лишнего движения и отвлечения участников, пожалуйста, не заказывайте еду или напитки. "
+        "Но вы можете принести с собой свои вкусняшки!\n\n"
+        "2️⃣Чистота и порядок.\n"
+        "Пожалуйста, не мусорьте. Убедитесь, что после окончания мероприятия всё выброшено в урны.\n\n"
+        "3️⃣Бережное отношение к имуществу.\n"
+        "Просьба не крушить и не ломать ничего в помещении. Давайте уважать пространство, в котором находимся.\n\n"
+        "4️⃣Берите с собой хорошее настроение.\n"
+        "Что входит в хорошее настроение? Приколы и позитив, желание хорошо провести время.\n\n"
+        "5️⃣<b>Не забудьте с собой карты для прохода в университет!</b>\n\n"
+        "Спасибо за понимание 💌",
+        reply_markup=keyboard,
+        parse_mode="HTML")
     await callback.message.delete()
     await callback.answer()
 
@@ -842,6 +1002,7 @@ async def show_my_regs(callback: CallbackQuery):
     sheets_to_check = [
         ("Киновечер", movie_sheet),  # листы с регами
         ("Киноигра", game_sheet),
+        ("Киноигра", game_sheet2),
         ("Выезд", trip_sheet)
     ]
 
@@ -871,10 +1032,59 @@ async def show_my_regs(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.message(Command("notify_missing_username"))
+async def notify_missing_username(message: Message):
+    records = game_sheet.get_all_records()
+    count = 0
+    failed = 0
+    contact_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="Написать организатору",
+                url="https://t.me/planb_on_fire"
+            )]
+        ]
+    )
+    for row in records:
+        user_id = row.get("user_id")
+        tg = row.get("Тг")
+        # проверяем отсутствие юзернейма
+        if tg and tg.strip().lower() in ["@без username", "без username"]:
+            try:
+                await message.bot.send_message(
+                    user_id,
+                    "Привет! 👋\n\n"
+                    "При регистрации у тебя не был указан @ username (Имя пользователя).\n"
+                    "Чтобы мы могли связаться с тобой, пожалуйста, добавь его у себя в настройках Телеграма "
+                    "и напиши свой username организатору. "
+                    "Чтобы открыть чат с ним, нажми на кнопку:",
+                    reply_markup=contact_keyboard
+                )
+                count += 1
+            except Exception as e:
+                print(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+                failed += 1
+    await message.answer(
+        f"Готово!\n"
+        f"Отправлено сообщений: {count}\n"
+        f"Не удалось отправить: {failed}"
+    )
+
+
+@router.callback_query(F.data == "denied")
+async def denied_registration(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await callback.message.answer("❌ Регистрация отменена! Подумаем еще раз?",
+                                  reply_markup=back_to_the_start())
+    await state.clear()
+    await callback.answer()
+
+
 async def send_start_message(target):
     await target.answer(
         text="Привет!\n\nЯ бот для регистрации на мероприятия Бауманского киноклуба <b>'Киношки'</b> "
              "\n\nНиже есть кнопки для выбора интересующего тебя мероприятия, жми!"
+             "\n\nТам же будут ответы на некоторые вопросы и правила."
              "\n\nЧтобы вернуться к этому сообщению пиши /start",
         parse_mode="HTML",
         reply_markup=get_real_main_inline_keyboard()
@@ -911,6 +1121,20 @@ async def mess(message: Message):
 
 
 
+# @router.callback_query(lambda c: c.data == "info_game")
+# async def process_more_info(callback: CallbackQuery):
+#     # await callback.message.delete()
+#     photo = FSInputFile("images/game_rules.jpg")
+#     await callback.message.answer_photo(
+#         photo=photo,
+#         caption="Киноигра — командный квиз с вопросами по всему, что связано с кино и сериалами!"
+#                 "\n\nКоманды от 4 до 8 человек\n\nВеселимся, отдыхаем, получаем подарки\n\n"
+#                 "<b>Правила в картинках, смотри внимательно.</b>"
+#                 "\n\nP.S. Усердно думаем над рейтингом команд)",
+#                 reply_markup=get_1game_inline_keyboard(),
+#                 parse_mode="HTML")
+#     await callback.message.delete()
+#     await callback.answer()
 
 
 
