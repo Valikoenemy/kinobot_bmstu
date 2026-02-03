@@ -60,6 +60,7 @@ game_sheet = workbook.worksheet("ЛистКиноигра")
 game_sheet2 = workbook.worksheet("ИграЛистОжидания")  # лист ожидания
 movie_sheet = workbook.worksheet("ЛистКиновечер")
 trip_sheet = workbook.worksheet("ЛистВыезд")
+trip_sheet2 = workbook.worksheet("ВыездЛистОжидания")
 # game_sheet.append_row(["Имя", "Команда", "Количество", "@username"])
 # movie_sheet.append_row(["Имя", "Группа", "@username"])
 events_sheet = workbook.worksheet("Мероприятия")
@@ -278,10 +279,10 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.message.answer(
             "⚠️ Основные места заняты.\n"
-            "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n"
-            "<b>Не спешите расстраиваться!</b>\n"
+            "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n\n"
+            "<b>Не спешите расстраиваться!</b>\n\n"
             "После закрытия регистрации мы начнём собирать подтверждения, "
-            "как правило некоторые команды отказываются от участия, в таком случае мы свяжемся с Вами "
+            "как правило, некоторые команды отказываются от участия, в таком случае мы свяжемся с Вами "
             "и если Вы будете согласны, то займёте их место\n\n"
             "Благодарим за понимание!🙏",
             parse_mode="HTML",
@@ -782,47 +783,125 @@ async def get_trip_sum(message: Message, state: FSMContext):
 @router.callback_query(F.data == "trip_confirm")
 async def confirm_registration(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    events = events_sheet.get_all_records()
-    trip = next((e for e in events if e["Название"] == "Выезд"), None)
-    group_link = trip["Ссылка на группу"]
+    user_id = callback.from_user.id
+    event = get_event_by_name("Выезд")
+    if not event:
+        await callback.message.answer("Ошибка: событие не найдено.",
+                                      reply_markup=back_to_the_start())
+        return
+    if is_user_registered(trip_sheet, user_id):
+        await callback.message.delete()
+        await callback.message.answer("Вы уже зарегистрированы в основном списке.",
+                                      reply_markup=back_to_the_start())
+        return
+    await callback.answer()
+
+    if is_user_registered(trip_sheet2, user_id):
+        await callback.message.delete()
+        await callback.message.answer("Вы уже находитесь в листе ожидания.",
+                                      reply_markup=back_to_the_start())
+        return
+    await callback.answer()
+
+    main_records = trip_sheet.get_all_records()
+    count = len(main_records)
+    limit = int(event["Лимит"])
+    username = callback.from_user.username or "без username"
+    trip_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    row = [
+        str(data['trip_name']),
+        str(data['trip_group_number']),
+        f"@{username}",
+        trip_timestamp,
+        user_id,
+        str(data['trip_phone_number']),
+        str(data['trip_date_of_birth']),
+        str(data['trip_illness']),
+        str(data['trip_special']),
+        str(data['trip_bauman']),
+        str(data['trip_approval'])
+    ]
+
+    group_link = event["Ссылка на группу"]
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Перейти в группу", url=group_link)],
             [InlineKeyboardButton(text="Назад!", callback_data="start")]
         ]
     )
-    await callback.message.delete()
-    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n"
-                                  "Переходи в группу, чтобы быть в курсе всей информации по выезду!👇",
-                                  reply_markup=keyboard,
-                                  parse_mode='HTML')
-    username = callback.from_user.username or "без username"
-    trip_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    row = [str(data['trip_name']),
-           str(data['trip_group_number']),
-           f"@{username}",
-           trip_timestamp,
-           str(callback.from_user.id),
-           str(data['trip_phone_number']),
-           str(data['trip_date_of_birth']),
-           str(data['trip_illness']),
-           str(data['trip_special']),
-           str(data['trip_bauman']),
-           str(data['trip_approval'])]
+    if count < limit:
+        append_row(trip_sheet, row)
+        await callback.message.delete()
+        await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n"
+                                      "Переходи в группу, чтобы быть в курсе всей информации по выезду!👇",
+                                      reply_markup=keyboard,
+                                      parse_mode='HTML')
+        await state.clear()
+        await callback.answer()
+    else:
+        # лист ожидания
+        append_row(trip_sheet2, row)
+        await callback.message.delete()
+        await callback.message.answer(
+            "⚠️ Основные места заняты.\n"
+            "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n\n"
+            "<b>Не спешите расстраиваться!</b>\n\n"
+            "После закрытия регистрации мы начнём собирать подтверждения, "
+            "как правило, некоторые участники отказываются от поездки, в таком случае мы свяжемся с Вами "
+            "и если Вы будете согласны, то займёте их место\n\n"
+            "Благодарим за понимание!🙏",
+            parse_mode="HTML",
+            reply_markup=back_to_the_start()
+        )
+        await state.clear()
+        await callback.answer()
 
-    print("Row:", row)
-    print("Sheet:", trip_sheet)
-    print("FSM data:", data)
-
-    try:
-        trip_sheet.append_row(row)
-    except Exception as e:
-        await callback.message.answer(f"Ошибка при записи в таблицу: {e}")
-
-    await callback.message.delete()
-    await state.clear()
-    await callback.answer()
+    # @router.callback_query(F.data == "trip_confirm")
+    # async def confirm_registration(callback: CallbackQuery, state: FSMContext):
+    #     data = await state.get_data()
+    # events = events_sheet.get_all_records()
+    # trip = next((e for e in events if e["Название"] == "Выезд"), None)
+    # group_link = trip["Ссылка на группу"]
+    # keyboard = InlineKeyboardMarkup(
+    #     inline_keyboard=[
+    #         [InlineKeyboardButton(text="Перейти в группу", url=group_link)],
+    #         [InlineKeyboardButton(text="Назад!", callback_data="start")]
+    #     ]
+    # )
+    # await callback.message.delete()
+    # await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n"
+    #                               "Переходи в группу, чтобы быть в курсе всей информации по выезду!👇",
+    #                               reply_markup=keyboard,
+    #                               parse_mode='HTML')
+    # username = callback.from_user.username or "без username"
+    # trip_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+    #
+    # row = [str(data['trip_name']),
+    #        str(data['trip_group_number']),
+    #        f"@{username}",
+    #        trip_timestamp,
+    #        user_id,
+    #        str(data['trip_phone_number']),
+    #        str(data['trip_date_of_birth']),
+    #        str(data['trip_illness']),
+    #        str(data['trip_special']),
+    #        str(data['trip_bauman']),
+    #        str(data['trip_approval'])]
+    #
+    # print("Row:", row)
+    # print("Sheet:", trip_sheet)
+    # print("FSM data:", data)
+    #
+    # try:
+    #     trip_sheet.append_row(row)
+    # except Exception as e:
+    #     await callback.message.answer(f"Ошибка при записи в таблицу: {e}")
+    #
+    # await callback.message.delete()
+    # await state.clear()
+    # await callback.answer()
 
 
 @router.callback_query(F.data == "trip_restart")
@@ -870,7 +949,7 @@ async def notify_trip(message: Message):
                 await bot.send_message(
                     user_id,
                     f"🎬 Напоминаем: Выезд состоится с {date_start} по {date_finish}, сбор в {time} в {place}!\n"
-                    f"Присоединяйтесь к группе, если ещё нет, вся информация там! 👇",
+                    f"Присоединяйтесь к группе, если ещё нет, далее вся информация будет там! 👇",
                     reply_markup=keyboard
                 )
                 sent_count += 1
@@ -998,16 +1077,16 @@ def get_real_main_inline_keyboard():
 @router.callback_query(F.data == "my_regs")
 async def show_my_regs(callback: CallbackQuery):
     user_id = str(callback.from_user.id)
-
-    sheets_to_check = [
-        ("Киновечер", movie_sheet),  # листы с регами
-        ("Киноигра", game_sheet),
-        ("Киноигра", game_sheet2),
-        ("Выезд", trip_sheet)
-    ]
-
     active_regs = []
     events = events_sheet.get_all_records()
+    sheets_to_check = [
+        ("Киновечер", movie_sheet),
+        ("Киноигра", game_sheet),
+        ("Киноигра", game_sheet2),
+        ("Выезд", trip_sheet),
+        ("Выезд", trip_sheet2)
+    ]
+
     for name, sheet in sheets_to_check:
         rows = sheet.get_all_records()
         for row in rows:
@@ -1016,19 +1095,23 @@ async def show_my_regs(callback: CallbackQuery):
                 if event_info:
                     date = event_info.get("Дата_начало", "—")
                     time = event_info.get("Время", "—")
-                    active_regs.append(f"• {name} — {date} в {time}")
+                    group_link = event_info.get("Ссылка на группу", "").strip()
+                    line = f"• {name} — {date} в {time}"  # скелет строки
+                    if group_link:
+                        line += f" — <a href=\"{group_link}\">Группа по мероприятию</a>"
+                    active_regs.append(line)
                 else:
                     active_regs.append(f"• {name} — дата/время не указаны")
                 break
 
     if active_regs:
-        events_list = "\n".join(active_regs)
+        events_list = "\n\n".join(active_regs)
         await callback.message.answer(
-            f"📋 Ваши активные регистрации:\n\n{events_list}"
+            f"📋 Ваши активные регистрации:\n\n{events_list}",
+            parse_mode="HTML"
         )
     else:
         await callback.message.answer("❌ У вас пока нет активных регистраций.")
-
     await callback.answer()
 
 
@@ -1116,25 +1199,6 @@ async def agree_callback(callback: CallbackQuery):
 @router.message()
 async def mess(message: Message):
     await message.answer("Не пиши мне такое!\nИли что-то пошло не так?\n\nТогда жми /start")
-
-
-
-
-
-# @router.callback_query(lambda c: c.data == "info_game")
-# async def process_more_info(callback: CallbackQuery):
-#     # await callback.message.delete()
-#     photo = FSInputFile("images/game_rules.jpg")
-#     await callback.message.answer_photo(
-#         photo=photo,
-#         caption="Киноигра — командный квиз с вопросами по всему, что связано с кино и сериалами!"
-#                 "\n\nКоманды от 4 до 8 человек\n\nВеселимся, отдыхаем, получаем подарки\n\n"
-#                 "<b>Правила в картинках, смотри внимательно.</b>"
-#                 "\n\nP.S. Усердно думаем над рейтингом команд)",
-#                 reply_markup=get_1game_inline_keyboard(),
-#                 parse_mode="HTML")
-#     await callback.message.delete()
-#     await callback.answer()
 
 
 
