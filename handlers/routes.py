@@ -113,7 +113,7 @@ async def check_quiz_availability(callback: CallbackQuery):
 
     if game and game["Доступно"].lower() == "да":
         date = game["Дата_начало"]
-        time = game["Время"]
+        time = game["Время_начало"]
         place = game["Место"]
         await callback.message.answer(
             f"📅 Киноигра состоится {date} в {time} в {place}.\n\n Регистрация открыта!",
@@ -316,13 +316,13 @@ async def notify_game(message: Message):
         return
 
     date = game["Дата_начало"]
-    time = game["Время"]
+    time = game["Время_начало"]
     place = game["Место"]
     # remember = game["Не забудьте"]
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="game_confirm_yes")],
-            [InlineKeyboardButton(text="Отменить ❌", callback_data="game_confirm_no")]
+            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="game_confirm_yes"),
+             InlineKeyboardButton(text="Отменить ❌", callback_data="game_confirm_no")]
         ]
     )
     rows = game_sheet.get_all_records()
@@ -335,9 +335,9 @@ async def notify_game(message: Message):
                     int(user_id),
                     (
                         f"🎬 Напоминаем: <b>Киноигра</b> состоится {date} в {time} в {place}!\n"
-                        f"Подтверждаете ли Вы свою регистрацию? 👇\n\n"
-                        f"(Если придёте, но есть изменения,"
-                        f"то <b>обязательно</b> напишите о них @planb_on_fire, a после нажмите кнопку подтвердить)\n"
+                        f"Подтверждаете ли Вы свою регистрацию?👇\n\n"
+                        f"(Если подтверждаете, но есть изменения, "
+                        f"то <b>обязательно</b> напишите о них @planb_on_fire и потом нажмите кнопку подтвердить)\n"
                     ),
                     reply_markup=keyboard,
                     parse_mode="HTML"
@@ -410,7 +410,7 @@ async def check_quiz_availability(callback: CallbackQuery):
 
     if movie and movie["Доступно"].lower() == "да":
         date = movie["Дата_начало"]
-        time = movie["Время"]
+        time = movie["Время_начало"]
         place = movie["Место"]
         await callback.message.answer(
             f"📅 Киновечер состоится {date} в {time} в {place}.\n\n Регистрация открыта!",
@@ -572,7 +572,7 @@ async def notify_movie(message: Message):
         return
     # remember = movie["Не забудьте"]
     date = movie["Дата_начало"]
-    time = movie["Время"]
+    time = movie["Время_начало"]
     group_link = movie["Ссылка на группу"]
 
     keyboard = InlineKeyboardMarkup(
@@ -636,7 +636,7 @@ async def check_trip_availability(callback: CallbackQuery):
 
         date_trip_start = trip["Дата_начало"]
         date_trip_finish = trip["Дата_конец"]
-        time = trip["Время"]
+        time = trip["Время_начало"]
         place = trip["Место"]
 
         await callback.message.answer(
@@ -761,11 +761,11 @@ async def get_trip_sum(message: Message, state: FSMContext):
         f"📝 Вот твои данные:\n\n"
         f"🎓 Являюсь студентом(-кой) МГТУ: {data['trip_bauman']}\n"
         f"👤 Имя и фамилия: {data['trip_name']} ({trip_user_mention})\n"
-        f" Номер телефона: {data['trip_phone_number']}\n"
+        f"☎️ Номер телефона: {data['trip_phone_number']}\n"
         f"🏷 Номер группы: {data['trip_group_number']}\n"
-        f" Дата рождения: {data['trip_date_of_birth']}\n"
-        f" Аллергия/болезни/травмы: {data['trip_illness']}\n"
-        f" Особенности питания: {data['trip_special']}"
+        f"🎊 Дата рождения: {data['trip_date_of_birth']}\n"
+        f"💊 Аллергия/болезни/травмы: {data['trip_illness']}\n"
+        f"🍽 Особенности питания: {data['trip_special']}"
     )
 
     keyboard = InlineKeyboardMarkup(
@@ -823,20 +823,11 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
         str(data['trip_approval'])
     ]
 
-    group_link = event["Ссылка на группу"]
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти в группу", url=group_link)],
-            [InlineKeyboardButton(text="Назад!", callback_data="start")]
-        ]
-    )
-
     if count < limit:
         append_row(trip_sheet, row)
         await callback.message.delete()
-        await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n"
-                                      "Переходи в группу, чтобы быть в курсе всей информации по выезду!👇",
-                                      reply_markup=keyboard,
+        await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n",
+                                      reply_markup=back_to_the_start(),
                                       parse_mode='HTML')
         await state.clear()
         await callback.answer()
@@ -857,51 +848,6 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
         )
         await state.clear()
         await callback.answer()
-
-    # @router.callback_query(F.data == "trip_confirm")
-    # async def confirm_registration(callback: CallbackQuery, state: FSMContext):
-    #     data = await state.get_data()
-    # events = events_sheet.get_all_records()
-    # trip = next((e for e in events if e["Название"] == "Выезд"), None)
-    # group_link = trip["Ссылка на группу"]
-    # keyboard = InlineKeyboardMarkup(
-    #     inline_keyboard=[
-    #         [InlineKeyboardButton(text="Перейти в группу", url=group_link)],
-    #         [InlineKeyboardButton(text="Назад!", callback_data="start")]
-    #     ]
-    # )
-    # await callback.message.delete()
-    # await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n"
-    #                               "Переходи в группу, чтобы быть в курсе всей информации по выезду!👇",
-    #                               reply_markup=keyboard,
-    #                               parse_mode='HTML')
-    # username = callback.from_user.username or "без username"
-    # trip_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
-    #
-    # row = [str(data['trip_name']),
-    #        str(data['trip_group_number']),
-    #        f"@{username}",
-    #        trip_timestamp,
-    #        user_id,
-    #        str(data['trip_phone_number']),
-    #        str(data['trip_date_of_birth']),
-    #        str(data['trip_illness']),
-    #        str(data['trip_special']),
-    #        str(data['trip_bauman']),
-    #        str(data['trip_approval'])]
-    #
-    # print("Row:", row)
-    # print("Sheet:", trip_sheet)
-    # print("FSM data:", data)
-    #
-    # try:
-    #     trip_sheet.append_row(row)
-    # except Exception as e:
-    #     await callback.message.answer(f"Ошибка при записи в таблицу: {e}")
-    #
-    # await callback.message.delete()
-    # await state.clear()
-    # await callback.answer()
 
 
 @router.callback_query(F.data == "trip_restart")
@@ -929,18 +875,17 @@ async def notify_trip(message: Message):
 
     date_start = trip["Дата_начало"]
     date_finish = trip["Дата_конец"]
-    time = trip["Время"]
-    group_link = trip["Ссылка на группу"]
+    time_start = trip["Время_начало"]
+    time_finish = trip["Время_конец"]
     place = trip["Место"]
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link)]
-        ]
-    )
-
     rows = trip_sheet.get_all_records()
     sent_count = 0
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="trip_confirm_yes"),
+             InlineKeyboardButton(text="Отменить ❌", callback_data="trip_confirm_no")]
+        ]
+    )
 
     for row in rows:
         user_id = row.get("user_id")
@@ -948,8 +893,23 @@ async def notify_trip(message: Message):
             try:
                 await bot.send_message(
                     user_id,
-                    f"🎬 Напоминаем: Выезд состоится с {date_start} по {date_finish}, сбор в {time} в {place}!\n"
-                    f"Присоединяйтесь к группе, если ещё нет, далее вся информация будет там! 👇",
+                    f"🎬💜 <b><i>Привет! Просим тебя подтвердить регистрацию на выезд Киношек:</i></b>"
+                    f"\n\nВыезд состоится с {date_start} по {date_finish}"
+                    f"\n\n<b>Регистрация на выезд(Сбор)</b> пройдет в {time_start} в {place}"
+                    f"\n<b>Отъезд</b> из лагеря будет в {time_finish}, вернёмся в ГУК"
+                    f"\n\n❗️<i>Что важно знать?</i>"
+                    f"\n\n• Покинуть лагерь раньше или приехать позже остальных — нельзя"
+                    f"\n• Проживание будет в комфортных корпусах лагеря"
+                    f"\n• Питание — отличное и три раз в день"
+                    f"\n• <b>Наличие алкоголя на территории лагеря строго запрещено</b>"
+                    f"\n\n❗️<i>Что важно иметь с собой?</i>"
+                    f"\n\n• Паспорт и медицинский полис(можно копию)"
+                    f"\n• Тёплые и спортивные вещи, зонт (<b>в т.ч. подходящую к погоде обувь!</b>)"
+                    f"\n• Средства личной гигиены(в корпусах есть душевые)"
+                    f"\n• При желаниии, можно брать с собой еду <i>без строгих условий хранения</i>(снеки)"
+                    f"\n• Хорошее настроение!"
+                    f"\n\n<b><i>Ну так что, Ты с нами?</i></b>",
+                    parse_mode="HTML",
                     reply_markup=keyboard
                 )
                 sent_count += 1
@@ -957,6 +917,32 @@ async def notify_trip(message: Message):
             except Exception as e:
                 print(f"Не удалось отправить {user_id}: {e}")
     await message.answer(f"✅ Рассылка завершена. Уведомлений отправлено: {sent_count}")
+
+
+@router.callback_query(F.data == "trip_confirm_yes")
+async def confirm_trip(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    rows = trip_sheet.get_all_records()
+
+    for i, row in enumerate(rows, start=2):
+        if str(row.get("user_id")) == str(user_id):
+            trip_sheet.update_cell(i, 12, "✅ Подтверждено")
+            break
+    await callback.message.answer("✅ Вы подтвердили участие в Выезде!")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trip_confirm_no")
+async def cancel_trip(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    rows = trip_sheet.get_all_records()
+
+    for i, row in enumerate(rows, start=2):
+        if str(row.get("user_id")) == str(user_id):
+            trip_sheet.update_cell(i, 12, "❌ Отменено")
+            break
+    await callback.message.answer("❌ Вы отменили участие в Выезде.")
+    await callback.answer()
 
 
 # Общие клавиши и сообщения
@@ -1094,7 +1080,7 @@ async def show_my_regs(callback: CallbackQuery):
                 event_info = next((e for e in events if e["Название"] == name), None)
                 if event_info:
                     date = event_info.get("Дата_начало", "—")
-                    time = event_info.get("Время", "—")
+                    time = event_info.get("Время_начало", "—")
                     group_link = event_info.get("Ссылка на группу", "").strip()
                     line = f"• {name} — {date} в {time}"  # скелет строки
                     if group_link:
