@@ -2,4 +2,4 @@
 pycache/
 .env
 kinocredentials.json
-
+.venv/
