@@ -1,0 +1,5 @@
+# created by virtualenv automatically
+.env
+kinocredentials.json
+.idea
+__pycache__
