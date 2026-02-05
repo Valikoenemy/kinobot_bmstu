@@ -1,5 +1,5 @@
 .idea/
-pycache/
+__pycache__/
 .env
 kinocredentials.json
 .venv/
