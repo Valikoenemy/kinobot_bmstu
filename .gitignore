@@ -1,5 +1,5 @@
 .idea/
 __pycache__/
 .env
-kinocredentials.json
+kinocredentials_new.json
 .venv/

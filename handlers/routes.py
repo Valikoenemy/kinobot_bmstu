@@ -52,7 +52,7 @@ scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive.file",
          "https://www.googleapis.com/auth/drive"]
 
-creds = ServiceAccountCredentials.from_json_keyfile_name("kinocredentials.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name("kinocredentials_new.json", scope)
 client = gspread.authorize(creds)
 
 workbook = client.open("КиношкиРега")
@@ -1085,17 +1085,24 @@ async def show_my_regs(callback: CallbackQuery):
         for row in rows:
             if str(row.get("user_id")) == user_id:
                 event_info = next((e for e in events if e["Название"] == name), None)
+
                 if event_info:
                     date = event_info.get("Дата_начало", "—")
                     time = event_info.get("Время_начало", "—")
                     group_link = event_info.get("Ссылка на группу", "").strip()
-                    line = f"• {name} — {date} в {time}"  # скелет строки
+                    org_tag = event_info.get("Контакт глав.орга меро", "").strip()
+                    line = f"• {name} — {date} в {time}"
+
                     if group_link:
-                        line += f" — <a href=\"{group_link}\">Группа по мероприятию</a>"
+                        line += f"\n — <a href=\"{group_link}\">Группа по мероприятию</a>"
+                    if org_tag:
+                        line += f"\n — <a href=\"{org_tag}\">Контакт организатора</a>"
                     active_regs.append(line)
+
                 else:
                     active_regs.append(f"• {name} — дата/время не указаны")
                 break
+
 
     if active_regs:
         events_list = "\n\n".join(active_regs)
