@@ -15,13 +15,13 @@ init-venv:
 	$(VENVDIR)/bin/pip install -r $(REQUIREMENTS)
 	
 up:
-	$(DOCKER) compose -f $(COMPOSE_FILE) up -d 
+	$(DOCKER) compose -p "kino-bot" -f $(COMPOSE_FILE) up -d 
 
 upd:
-	$(DOCKER) compose -f $(COMPOSE_FILE) up -d --build 
+	$(DOCKER) compose -p "kino-bot" -f $(COMPOSE_FILE) up -d --build 
 
 upda: 
-	$(DOCKER) compose -f $(COMPOSE_FILE) up --build 
+	$(DOCKER) compose -p "kino-bot" -f $(COMPOSE_FILE) up --build 
 
 down:
 	$(DOCKER) compose -f $(COMPOSE_FILE) down
