@@ -89,8 +89,8 @@ def get_1game_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_game")],
-            [InlineKeyboardButton(text="Правила на Киноигре", callback_data="game_rules")]
+            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_game", style="success")],
+            [InlineKeyboardButton(text="Правила на Киноигре", callback_data="game_rules", style="primary")]
         ]
     )
     return keyboard
@@ -100,7 +100,7 @@ def get_2game_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Зарегистрироваться", callback_data="reg_game")]
+            [InlineKeyboardButton(text="Зарегистрироваться", callback_data="reg_game", style="success")]
         ]
     )
     return keyboard
@@ -116,7 +116,9 @@ async def check_quiz_availability(callback: CallbackQuery):
         time = game["Время_начало"]
         place = game["Место"]
         await callback.message.answer(
-            f"📅 Киноигра состоится {date} в {time} в {place}.\n\n"
+            f"📅 Киноигра состоится {date}\n"
+            f"Время: {time} \n"
+            f"Место: {place}.\n\n"
             f"<b>Регистрация открыта</b>❗️",
             parse_mode="HTML",
             reply_markup=get_2game_inline_keyboard()
@@ -130,7 +132,8 @@ async def check_quiz_availability(callback: CallbackQuery):
 def agree_game_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Согласен(-на)", callback_data="game_FSM")]
+            [InlineKeyboardButton(text="Отменить регистрацию", callback_data="denied", style="danger"),
+             InlineKeyboardButton(text="Согласен(-на)", callback_data="game_FSM", style="success")]
         ]
     )
     return keyboard
@@ -139,12 +142,14 @@ def agree_game_keyboard():
 @router.callback_query(F.data == "reg_game")
 async def law_game_registration(callback: CallbackQuery):
     await callback.message.delete()
-    await callback.message.answer("Перед началом — секунда формальности.\n\n"
-                                  "Нам нужно твоё <b>согласие</b> на обработку персональных данных"
-                                  " в соответствии с Федеральным законом от 27.07.2006 №152-ФЗ"
-                                  " «О персональных данных». ",
-                                  parse_mode="HTML",
-                                  reply_markup=agree_game_keyboard())
+    await callback.message.answer(
+        "Перед началом — секунда формальности.\n\n"
+        "Нам нужно твоё <b>согласие</b> на обработку персональных данных"
+        " в соответствии с Федеральным законом от 27.07.2006 №152-ФЗ"
+        " «О персональных данных». ",
+        parse_mode="HTML",
+        reply_markup=agree_game_keyboard()
+    )
     await callback.answer()
 
 
@@ -153,7 +158,9 @@ async def start_game_registration(callback: CallbackQuery, state: FSMContext):
     await state.update_data(game_approval="да")
     await callback.message.delete()
     await callback.message.answer("Все ли члены команды являются студентами МГТУ им. Н.Э. Баумана?\n\n"
-                                  "Ответь 'да' или 'нет'.")
+                                  "Ответьте 'да' или 'нет'.\n\n"
+                                  "<b><i>Если в команде есть выпускники — напишите слово 'выпускник'</i></b>",
+                                  parse_mode="HTML")
     await state.set_state(GameRegistration.game_bauman)
     await callback.answer()
 
@@ -162,10 +169,43 @@ async def start_game_registration(callback: CallbackQuery, state: FSMContext):
 async def check_student_status(message: Message, state: FSMContext):
     text = message.text.strip().lower()
 
-    if text not in ["да", "нет"]:
-        await message.answer("❌ Пожалуйста, ответьте только 'да' или 'нет'.")
+    if text not in ["да", "нет", "выпускник"]:
+        await message.answer("❌ <b>Пожалуйста, ответьте только 'да' или 'нет' или 'выпускник'.</b>",
+                             parse_mode='HTML')
         return
-
+    if text == "нет":
+        allowed = can_register_non_bmstu("Киноигра", events_sheet)
+        if not allowed:
+            await message.answer(
+                "К сожалению, регистрация для гостей уже закрыта 😢\n"
+                "По правилам, нам необходимо подать списки с гостями — не позднее недели до мероприятия.\n\n"
+                "Будем рады видеть Вас на других наших мероприятиях!\n"
+                "С любовью, команда Киношек 💜",
+                reply_markup=back_to_the_start()
+            )
+            await state.clear()
+            return
+    if text == "выпускник":
+        allowed = can_register_non_bmstu("Киноигра", events_sheet)
+        if not allowed:
+            await message.answer(
+                "К сожалению, регистрация для выпускников уже закрыта 😢\n"
+                "Так как для того чтобы попасть на мероприятие "
+                "необходимо самостоятельно оформить пропуск за неделю до.\n\n"
+                "Будем рады видеть Вас на других наших мероприятиях!\n"
+                "С любовью, команда Киношек 💜",
+                reply_markup=back_to_the_start()
+            )
+            await state.clear()
+            return
+        if allowed:
+            await message.answer(
+                "Чтобы попасть на данное мероприятие вам <i>необходимо самостоятельно оформить пропуск</i> "
+                "на сайте «Бауманского Братства».\n"
+                "Ссылка на нужную страницу будет <b>после регистрации</b>, "
+                "а пока <b>можете продолжить заполнять данные!</b> 💜",
+                parse_mode="HTML"
+            )
     await state.update_data(game_bauman=text)
     await message.answer("<b>Твоё имя и фамилия, Капитан?</b>\n\n"
                          "<i>Если ты попал(-а) не туда, то в конце будет кнопка 'Отменить'"
@@ -213,8 +253,8 @@ async def get_team_name(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Начать заново", callback_data="game_restart")],
-            [InlineKeyboardButton(text="Подтвердить", callback_data="game_confirm")],
-            [InlineKeyboardButton(text="Отменить", callback_data="denied")]
+            [InlineKeyboardButton(text="Подтвердить", callback_data="game_confirm", style="success")],
+            [InlineKeyboardButton(text="Отменить", callback_data="denied", style="danger")]
         ]
     )
     await message.answer(summary, reply_markup=keyboard)
@@ -235,14 +275,16 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
     # проверка на повторную регу
     if is_user_registered(game_sheet, user_id):
         await callback.message.delete()
-        await callback.message.answer("Вы уже зарегистрированы в основном списке.",
+        await callback.message.answer("Вы и ваша команда уже зарегистрированы в основном списке❗️\n"
+                                      "Повторная регистрация не требуется, а другой команде нужен другой капитан",
                                       reply_markup=back_to_the_start())
         return
     await callback.answer()
 
     if is_user_registered(game_sheet2, user_id):
         await callback.message.delete()
-        await callback.message.answer("Вы уже находитесь в листе ожидания.",
+        await callback.message.answer("Вы уже находитесь в листе ожидания❗️\n"
+                                      "Повторная регистрация не требуется, а другой команде нужен другой капитан",
                                       reply_markup=back_to_the_start())
         return
     await callback.answer()
@@ -261,17 +303,39 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
         data['game_bauman'],
         data['game_approval']
     ]
+
+    graduate = data.get("game_bauman") == "выпускник"
+    keyboard_graduate = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Заполнить заявление на пропуск",
+                                  url="https://alumni.bmstu.ru/pass-to-bauman-university",
+                                  style="success")]
+        ]
+    )
+
     # основной лист
     if count < limit:
         append_row(game_sheet, row)
         await callback.message.delete()
-        await callback.message.answer(
-            "✅ Регистрация завершена! <b>Увидимся на Киноигре!</b> 🎉",
-            reply_markup=back_to_the_start(),
-            parse_mode='HTML'
-        )
+        if graduate:
+            await callback.message.answer(
+                "✅ Регистрация завершена! <b>Увидимся на Киноигре!</b> 🎉\n\n"
+                "<i>Контакт организатора,на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>\n\n"
+                "⚠️ Всем выпускникам участникам надо <b>обязательно</b> заполнить заявление на пропуск для выпускников "
+                "на сайте «Бауманского Братства» "
+                "чтобы попасть на мероприятие\n\n<b>(сделать это необходимо прямо сейчас)</b> 👇",
+                reply_markup=keyboard_graduate,
+                parse_mode='HTML')
+        else:
+            await callback.message.answer(
+                "✅ Регистрация завершена! <b>Увидимся на Киноигре!</b> 🎉\n\n"
+                "<i>Контакт организатора,на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>",
+                reply_markup=back_to_the_start(),
+                parse_mode='HTML'
+            )
         await state.clear()
         await callback.answer()
+
     else:
         # лист ожидания
         game_sheet2.append_row([
@@ -279,17 +343,40 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
             f"@{username}", timestamp, user_id, data['game_bauman'], data['game_approval']
         ])
         await callback.message.delete()
-        await callback.message.answer(
-            "⚠️ Основные места заняты.\n"
-            "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n\n"
-            "<b>Не спешите расстраиваться!</b>\n\n"
-            "После закрытия регистрации мы начнём собирать подтверждения, "
-            "как правило, некоторые команды отказываются от участия, в таком случае мы свяжемся с Вами "
-            "и если Вы будете согласны, то займёте их место\n\n"
-            "Благодарим за понимание!🙏",
-            parse_mode="HTML",
-            reply_markup=back_to_the_start()
-        )
+
+        if graduate:
+            await callback.message.answer(
+                "⚠️ Основные места заняты.\n"
+                "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n\n"
+                "<b>Не спешите расстраиваться!</b>\n\n"
+                "После закрытия регистрации мы начнём собирать подтверждения, "
+                "как правило, некоторые команды отказываются от участия, в таком случае мы свяжемся с Вами "
+                "и если Вы будете согласны, то займёте их место\n\n"
+                "Благодарим за понимание!🙏"
+                "\n\n<i>Контакт организатора, на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>",
+                parse_mode="HTML",
+                reply_markup=back_to_the_start()
+            )
+            await callback.message.answer(
+                "❗️ Всем выпускникам участникам надо <b>обязательно</b> заполнить заявление на пропуск для выпускников "
+                "на сайте «Бауманского Братства» "
+                "чтобы попасть на мероприятие\n\n<b>(сделать это необходимо прямо сейчас)</b> 👇",
+                parse_mode="HTML",
+                reply_markup=keyboard_graduate
+            )
+        else:
+            await callback.message.answer(
+                "⚠️ Основные места заняты.\n"
+                "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n\n"
+                "<b>Не спешите расстраиваться!</b>\n\n"
+                "После закрытия регистрации мы начнём собирать подтверждения, "
+                "как правило, некоторые команды отказываются от участия, в таком случае мы свяжемся с Вами "
+                "и если Вы будете согласны, то займёте их место\n\n"
+                "Благодарим за понимание!🙏"
+                "\n\n<i>Контакт организатора, на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>",
+                parse_mode="HTML",
+                reply_markup=back_to_the_start()
+            )
         await state.clear()
         await callback.answer()
 
@@ -323,8 +410,8 @@ async def notify_game(message: Message):
     # remember = game["Не забудьте"]
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="game_confirm_yes"),
-             InlineKeyboardButton(text="Отменить ❌", callback_data="game_confirm_no")]
+            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="game_confirm_yes", style="success"),
+             InlineKeyboardButton(text="Отменить ❌", callback_data="game_confirm_no", style="danger")]
         ]
     )
     rows = game_sheet.get_all_records()
@@ -388,8 +475,8 @@ def get_1movie_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_movie")],
-            [InlineKeyboardButton(text="Правила на Киновечере", callback_data="movie_rules")]
+            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_movie", style="success")],
+            [InlineKeyboardButton(text="Правила на Киновечере", callback_data="movie_rules", style="primary")]
         ]
     )
     return keyboard
@@ -399,7 +486,7 @@ def get_2movie_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Зарегистироваться", callback_data="reg_movie")]
+            [InlineKeyboardButton(text="Зарегистироваться", callback_data="reg_movie", style="success")]
         ]
     )
     return keyboard
@@ -415,7 +502,9 @@ async def check_quiz_availability(callback: CallbackQuery):
         time = movie["Время_начало"]
         place = movie["Место"]
         await callback.message.answer(
-            f"📅 Киновечер состоится {date} в {time} в {place}."
+            f"📅 Киновечер состоится {date}\n"
+            f"Время: {time}\n"
+            f"Место: {place}"
             f"\n\n<b>Регистрация открыта</b>❗️",
             parse_mode="HTML",
             reply_markup=get_2movie_inline_keyboard()
@@ -429,7 +518,8 @@ async def check_quiz_availability(callback: CallbackQuery):
 def agree_movie_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Согласен(-на)", callback_data="movie_FSM")]
+            [InlineKeyboardButton(text="Отменить регистрацию", callback_data="denied", style="danger"),
+             InlineKeyboardButton(text="Согласен(-на)", callback_data="movie_FSM", style="success")]
         ]
     )
     return keyboard
@@ -452,21 +542,54 @@ async def start_movie_registration(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await state.update_data(movie_approval="да")
     await callback.message.answer("Являешься ли ты студентом(-кой) МГТУ им. Н.Э. Баумана?\n\n"
-                                  "<i>Ответь 'да' или 'нет'.</i>",
+                                  "<i>Ответьте 'да', 'нет', 'выпускник'.</i>",
                                   parse_mode='HTML')
     await state.set_state(MovieRegistration.movie_bauman)
     await callback.answer()
 
 
 @router.message(MovieRegistration.movie_bauman)
-async def check_student_status_movie(message: Message, state: FSMContext):
+async def process_bmstu_answer(message: Message, state: FSMContext):
     text = message.text.strip().lower()
 
-    if text not in ["да", "нет"]:
-        await message.answer("❌ <b>Пожалуйста, ответьте только 'да' или 'нет'.</b>",
+    if text not in ["да", "нет", "выпускник"]:
+        await message.answer("❌ <b>Пожалуйста, ответьте только 'да' или 'нет' или 'выпускник'.</b>",
                              parse_mode='HTML')
         return
 
+    if text == "нет":
+        allowed = can_register_non_bmstu("Киновечер", events_sheet)
+        if not allowed:
+            await message.answer(
+                "К сожалению, регистрация для гостей уже закрыта 😢\n"
+                "По правилам, нам необходимо подать списки с гостями — не позднее недели до мероприятия.\n\n"
+                "Будем рады видеть Вас на других наших мероприятиях!\n"
+                "С любовью, команда Киношек 💜",
+                reply_markup=back_to_the_start()
+            )
+            await state.clear()
+            return
+    if text == "выпускник":
+        allowed = can_register_non_bmstu("Киновечер", events_sheet)
+        if not allowed:
+            await message.answer(
+                "К сожалению, регистрация для выпускников уже закрыта 😢\n"
+                "Так как для того чтобы попасть на мероприятие "
+                "необходимо самостоятельно оформить пропуск за неделю до.\n\n"
+                "Будем рады видеть Вас на других наших мероприятиях!\n"
+                "С любовью, команда Киношек 💜",
+                reply_markup=back_to_the_start()
+            )
+            await state.clear()
+            return
+        if allowed:
+            await message.answer(
+                "Чтобы попасть на данное мероприятие вам <i>необходимо самостоятельно оформить пропуск</i> "
+                "на сайте «Бауманского Братства».\n"
+                "Ссылка на нужную страницу будет <b>после регистрации</b>, "
+                "а пока <b>можете продолжить заполнять данные!</b> 💜",
+                parse_mode="HTML"
+            )
     await state.update_data(movie_bauman=text)
     await message.answer("<b>Твои имя и фамилия?</b>\n\n"
                          "<i>Если ты попал(-а) не туда, то в конце будет кнопка 'Отменить'"
@@ -478,7 +601,10 @@ async def check_student_status_movie(message: Message, state: FSMContext):
 @router.message(MovieRegistration.movie_name)
 async def get_movie_group(message: Message, state: FSMContext):
     await state.update_data(movie_name=message.text)
-    await message.answer("Номер твоей группы обучения:\n\n<i>(Например:РК5-11Б)</i>", parse_mode="HTML")
+    await message.answer("Номер твоей группы обучения:\n"
+                         "<i>(Например:РК5-11Б)</i>\n\n"
+                         "<i>Если ты выпускник или не студент, то отправь в чат дефис или тире</i> 🙏",
+                         parse_mode="HTML")
     await state.set_state(MovieRegistration.movie_group_number)
 
 
@@ -499,8 +625,8 @@ async def get_movie_sum(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Начать заново", callback_data="movie_restart")],
-            [InlineKeyboardButton(text="Подтвердить", callback_data="movie_confirm")],
-            [InlineKeyboardButton(text="Отмена", callback_data="denied")]
+            [InlineKeyboardButton(text="Подтвердить", callback_data="movie_confirm", style="success")],
+            [InlineKeyboardButton(text="Отмена", callback_data="denied", style="danger")]
         ]
     )
 
@@ -518,15 +644,36 @@ async def confirm_movie_registration(callback: CallbackQuery, state: FSMContext)
     group_link = movie["Ссылка на группу"]
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link)],
-            [InlineKeyboardButton(text="Назад!", callback_data="start")]
+            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link, style="primary")],
+            [InlineKeyboardButton(text="К началу!", callback_data="start")]
         ]
     )
-
-    await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Киновечере!</b> 🎉\n\n "
-                                  "<b>Переходи в группу</b>, чтобы быть в курсе всей информации по мероприятию!👇",
-                                  reply_markup=keyboard,
-                                  parse_mode='HTML')
+    keyboard_graduate = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Заполнить заявление на пропуск",
+                                  url="https://alumni.bmstu.ru/pass-to-bauman-university",
+                                  style="success")],
+            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link, style="primary")],
+            [InlineKeyboardButton(text="К началу!", callback_data="start")]
+        ]
+    )
+    graduate = data.get("movie_bauman") == "выпускник"
+    if graduate:
+        await callback.message.answer(
+            "✅ Регистрация завершена! <b>Увидимся на Киновечере!</b> 🎉\n\n "
+            "<i>Контакт организатора, на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>\n\n"
+            "⚠️ Обязательно заполни заявление на пропуск для выпускников "
+            "чтобы попасть на мероприятие <b><i>(сделать это необходимо прямо сейчас)</i></b>.\n\n"
+            "И, конечно, <b>переходи в группу</b>, чтобы быть в курсе всей информации по мероприятию!👇",
+            reply_markup=keyboard_graduate,
+            parse_mode='HTML')
+    else:
+        await callback.message.answer(
+            "✅ Регистрация завершена! <b>Увидимся на Киновечере!</b> 🎉\n\n"
+            "<i>Контакт организатора, на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>\n\n"
+            "<b>Переходи в группу</b>, чтобы быть в курсе всей информации по мероприятию!👇",
+            reply_markup=keyboard,
+            parse_mode='HTML')
     username = callback.from_user.username or "без username"
     movie_timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
 
@@ -536,7 +683,7 @@ async def confirm_movie_registration(callback: CallbackQuery, state: FSMContext)
            movie_timestamp,
            str(callback.from_user.id),
            str(data['movie_bauman']),
-           str(data['game_approval'])]
+           str(data['movie_approval'])]
 
     print("Row:", row)
     print("Sheet:", movie_sheet)
@@ -581,7 +728,7 @@ async def notify_movie(message: Message):
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link)]
+            [InlineKeyboardButton(text="Перейти в группу 🎬", url=group_link, style="primary")]
         ]
     )
 
@@ -616,7 +763,7 @@ def get_1trip_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_trip")]
+            [InlineKeyboardButton(text="Доступные мероприятия", callback_data="available_trip", style="success")]
         ]
     )
     return keyboard
@@ -626,7 +773,7 @@ def get_2trip_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Назад", callback_data="info_start")],
-            [InlineKeyboardButton(text="Зарегистироваться", callback_data="reg_trip")]
+            [InlineKeyboardButton(text="Зарегистироваться", callback_data="reg_trip", style="success")]
         ]
     )
     return keyboard
@@ -644,7 +791,9 @@ async def check_trip_availability(callback: CallbackQuery):
         place = trip["Место"]
 
         await callback.message.answer(
-            f"📅 Выезд состоится с {date_trip_start} по {date_trip_finish}. Сбор на выезд будет в {time}, из {place}."
+            f"📅 Выезд состоится {date_trip_start} по {date_trip_finish}. "
+            f"\nСбор на выезд будет в пятницу в {time}"
+            f"\nМесто сбора:{place}."
             f"\n\n<b>Регистрация открыта</b>❗️",
             parse_mode="HTML",
             reply_markup=get_2trip_inline_keyboard()
@@ -658,7 +807,8 @@ async def check_trip_availability(callback: CallbackQuery):
 def agree_trip_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Согласен(-на)", callback_data="trip_FSM")]
+            [InlineKeyboardButton(text="Отменить регистрацию", callback_data="denied", style="danger"),
+             InlineKeyboardButton(text="Согласен(-на)", callback_data="trip_FSM", style="success")]
         ]
     )
     return keyboard
@@ -681,7 +831,7 @@ async def start_trip_registration(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await state.update_data(trip_approval="да")
     await callback.message.answer("Являешься ли ты студентом(-кой) МГТУ им. Н.Э. Баумана?\n\n"
-                                  "<i>Ответь 'да' или 'нет'.</i>",
+                                  "<i>Ответьте 'да' или 'нет'.</i>",
                                   parse_mode='HTML')
     await state.set_state(TripRegistration.trip_bauman)
     await callback.answer()
@@ -699,17 +849,18 @@ async def check_student_status_trip(message: Message, state: FSMContext):
     if text == "нет":
         # остановка регистрации
         await message.answer(
-            "❌ Регистрация доступна только для студентов МГТУ.\n\n"
-            "Вы можете вернуться в начало и выбрать другое действие:",
+            "❌ К сожалению, регистрация доступна только для студентов МГТУ.\n\n"
+            "Вы можете вернуться в начало и выбрать другое меропритие! 💜",
             reply_markup=back_to_the_start()
         )
         await state.clear()
         return
 
     await state.update_data(trip_bauman=text)
-    await message.answer("<b>Твоё имя и фамилия?</b>\n\n"
-                         "<i>Если ты попал не туда, то в конце будет кнопка 'Отменить'"
-                         " и ты вернешься в начало.</i>",
+    await message.answer("<b>Твоё ФИО?</b>\n\n"
+                         "<i>(Например: Иванов Иван Иванович)</i>\n\n"
+                         "<b><i>Если ты попал не туда, то в конце будет кнопка 'Отменить'"
+                         " и ты вернешься в начало.</i></b>",
                          parse_mode="HTML")
     await state.set_state(TripRegistration.trip_name)
 
@@ -765,7 +916,7 @@ async def get_trip_sum(message: Message, state: FSMContext):
     summary = (
         f"📝 Вот твои данные:\n\n"
         f"🎓 Являюсь студентом(-кой) МГТУ: {data['trip_bauman']}\n"
-        f"👤 Имя и фамилия: {data['trip_name']} ({trip_user_mention})\n"
+        f"👤 ФИО: {data['trip_name']} ({trip_user_mention})\n"
         f"☎️ Номер телефона: {data['trip_phone_number']}\n"
         f"🏷 Номер группы: {data['trip_group_number']}\n"
         f"🎊 Дата рождения: {data['trip_date_of_birth']}\n"
@@ -776,8 +927,8 @@ async def get_trip_sum(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Начать заново", callback_data="trip_restart")],
-            [InlineKeyboardButton(text="Подтвердить", callback_data="trip_confirm")],
-            [InlineKeyboardButton(text="Отмена", callback_data="denied")]
+            [InlineKeyboardButton(text="Подтвердить", callback_data="trip_confirm", style="success")],
+            [InlineKeyboardButton(text="Отмена", callback_data="denied", style="danger")]
         ]
     )
 
@@ -796,14 +947,16 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
         return
     if is_user_registered(trip_sheet, user_id):
         await callback.message.delete()
-        await callback.message.answer("Вы уже зарегистрированы в основном списке.",
+        await callback.message.answer("Вы уже зарегистрированы в основном списке❗️\n"
+                                      "Повторная регистрация не требуется.",
                                       reply_markup=back_to_the_start())
         return
     await callback.answer()
 
     if is_user_registered(trip_sheet2, user_id):
         await callback.message.delete()
-        await callback.message.answer("Вы уже находитесь в листе ожидания.",
+        await callback.message.answer("Вы уже находитесь в листе ожидания❗️\n"
+                                      "Повторная регистрация не требуется.",
                                       reply_markup=back_to_the_start())
         return
     await callback.answer()
@@ -831,9 +984,11 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
     if count < limit:
         append_row(trip_sheet, row)
         await callback.message.delete()
-        await callback.message.answer("✅ Регистрация завершена! <b>Увидимся на Выезде!</b> 🎉\n\n",
-                                      reply_markup=back_to_the_start(),
-                                      parse_mode='HTML')
+        await callback.message.answer(
+            "✅ Регистрация завершена! <b>Жди подтверждения и увидимся на Выезде!</b> 🎉\n\n"
+            "<i>Контакт организатора, на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>",
+            reply_markup=back_to_the_start(),
+            parse_mode='HTML')
         await state.clear()
         await callback.answer()
     else:
@@ -845,9 +1000,10 @@ async def confirm_registration(callback: CallbackQuery, state: FSMContext):
             "Вы зарегистрированы, но добавлены в <b>лист ожидания</b>.\n\n"
             "<b>Не спешите расстраиваться!</b>\n\n"
             "После закрытия регистрации мы начнём собирать подтверждения, "
-            "как правило, некоторые участники отказываются от поездки, в таком случае мы свяжемся с Вами "
+            "как правило, некоторые участники отказываются от поездки, в таком случае <b>мы свяжемся с Вами</b> "
             "и если Вы будете согласны, то займёте их место\n\n"
-            "Благодарим за понимание!🙏",
+            "Благодарим за понимание!🙏"
+            "\n\n<i>Контакт организатора, на случай важных вопросов, будет в кнопке 'Мои регистрации'</i>",
             parse_mode="HTML",
             reply_markup=back_to_the_start()
         )
@@ -887,8 +1043,8 @@ async def notify_trip(message: Message):
     sent_count = 0
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="trip_confirm_yes"),
-             InlineKeyboardButton(text="Отменить ❌", callback_data="trip_confirm_no")]
+            [InlineKeyboardButton(text="Подтвердить ✅", callback_data="trip_confirm_yes", style="success"),
+             InlineKeyboardButton(text="Отменить ❌", callback_data="trip_confirm_no", style="danger")]
         ]
     )
 
@@ -905,13 +1061,13 @@ async def notify_trip(message: Message):
                     f"\n\n❗️<i>Что важно знать?</i>"
                     f"\n\n• Покинуть лагерь раньше или приехать позже остальных — нельзя"
                     f"\n• Проживание будет в комфортных корпусах лагеря"
-                    f"\n• Питание — отличное и три раз в день"
+                    f"\n• Питание — отличное и три раза в день"
                     f"\n• <b>Наличие алкоголя на территории лагеря строго запрещено</b>"
                     f"\n\n❗️<i>Что важно иметь с собой?</i>"
                     f"\n\n• Паспорт и медицинский полис(можно копию)"
                     f"\n• Тёплые и спортивные вещи, зонт (<b>в т.ч. подходящую к погоде обувь!</b>)"
                     f"\n• Средства личной гигиены(в корпусах есть душевые)"
-                    f"\n• При желаниии, можно брать с собой еду <i>без строгих условий хранения</i>(снеки)"
+                    f"\n• При желаниии, можно брать с собой еду <i>без строгих условий хранения</i> (снеки)"
                     f"\n• Хорошее настроение!"
                     f"\n\n<b><i>Ну так что, Ты с нами?</i></b>",
                     parse_mode="HTML",
@@ -1058,10 +1214,10 @@ async def process_more_info(callback: CallbackQuery):
 def get_real_main_inline_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Киноигра", callback_data="info_game")],
-            [InlineKeyboardButton(text="Киновечер", callback_data="info_movie")],
-            [InlineKeyboardButton(text="Выезд", callback_data="info_trip")],
-            [InlineKeyboardButton(text="Мои активные регистрации", callback_data="my_regs")]
+            [InlineKeyboardButton(text="Киноигра", callback_data="info_game", style="primary")],
+            [InlineKeyboardButton(text="Киновечер", callback_data="info_movie", style="primary")],
+            [InlineKeyboardButton(text="Выезд", callback_data="info_trip", style="primary")],
+            [InlineKeyboardButton(text="Мои активные регистрации", callback_data="my_regs", style="success")]
         ]
     )
     return keyboard
@@ -1115,38 +1271,60 @@ async def show_my_regs(callback: CallbackQuery):
     await callback.answer()
 
 
+def can_register_non_bmstu(event_name: str, events_1, days_limit: int = 7) -> bool:
+    events = events_1.get_all_records()
+    event_info = next((e for e in events if e["Название"] == event_name), None)
+
+    if not event_info:
+        return True  # если нет данных не блокируем
+
+    date_str = event_info.get("Дата_начало")
+    if not date_str:
+        return True  # если нет даты не блокируем
+
+    try:
+        event_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+    except ValueError:
+        return True  # если косяк в дате
+    # все три блока на случай косяков
+
+    today = datetime.now().date()
+    days_left = (event_date - today).days
+    return days_left > days_limit
+
+
 @router.message(Command("notify_missing_username"))
 async def notify_missing_username(message: Message):
-    records = game_sheet.get_all_records()
+    worksheets = workbook.worksheets()
     count = 0
     failed = 0
     contact_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(
                 text="Написать организатору",
-                url="https://t.me/planb_on_fire"
-            )]
+                url="https://t.me/planb_on_fire", style="primary")]
         ]
     )
-    for row in records:
-        user_id = row.get("user_id")
-        tg = row.get("Тг")
-        # проверяем отсутствие юзернейма
-        if tg and tg.strip().lower() in ["@без username", "без username"]:
-            try:
-                await message.bot.send_message(
-                    user_id,
-                    "Привет! 👋\n\n"
-                    "При регистрации у тебя не был указан @ username (Имя пользователя).\n"
-                    "Чтобы мы могли связаться с тобой, пожалуйста, добавь его у себя в настройках Телеграма "
-                    "и напиши свой username организатору. "
-                    "Чтобы открыть чат с ним, нажми на кнопку:",
-                    reply_markup=contact_keyboard
-                )
-                count += 1
-            except Exception as e:
-                print(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
-                failed += 1
+    for sheet in worksheets:
+        records = sheet.get_all_records()
+        for row in records:
+            user_id = row.get("user_id")
+            tg = row.get("Тг")
+            if tg and tg.strip().lower() in ["@без username", "без username"]:
+                try:
+                    await message.bot.send_message(
+                        user_id,
+                        "Привет! 👋\n\n"
+                        "При регистрации у тебя не был указан @username (Имя пользователя).\n\n"
+                        "Чтобы мы могли связаться с тобой, пожалуйста, добавь его у себя в настройках Телеграма "
+                        "и напиши свой username организатору.\n\n"
+                        "Чтобы открыть чат с ним, нажми на кнопку:",
+                        reply_markup=contact_keyboard
+                    )
+                    count += 1
+                except Exception as e:
+                    print(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+                    failed += 1
     await message.answer(
         f"Готово!\n"
         f"Отправлено сообщений: {count}\n"
@@ -1156,10 +1334,10 @@ async def notify_missing_username(message: Message):
 
 @router.callback_query(F.data == "denied")
 async def denied_registration(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     await callback.message.delete()
     await callback.message.answer("❌ Регистрация отменена! Подумаем еще раз?",
                                   reply_markup=back_to_the_start())
-    await state.clear()
     await callback.answer()
 
 
@@ -1177,7 +1355,7 @@ async def send_start_message(target):
 def back_to_the_start():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="К началу!", callback_data="start")]
+            [InlineKeyboardButton(text="К началу!", callback_data="start", style="primary")]
         ]
     )
     return keyboard
