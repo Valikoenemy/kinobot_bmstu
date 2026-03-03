@@ -407,7 +407,7 @@ async def notify_game(message: Message):
     date = game["Дата_начало"]
     time = game["Время_начало"]
     place = game["Место"]
-    # remember = game["Не забудьте"]
+    comment = game["Комментарий"]
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Подтвердить ✅", callback_data="game_confirm_yes", style="success"),
@@ -427,6 +427,7 @@ async def notify_game(message: Message):
                         f"Подтверждаете ли Вы свою регистрацию?👇\n\n"
                         f"(Если подтверждаете, но есть изменения, "
                         f"то <b>обязательно</b> напишите о них @planb_on_fire и потом нажмите кнопку подтвердить)\n"
+                        f"\n\n<b>{comment}</b>"
                     ),
                     reply_markup=keyboard,
                     parse_mode="HTML"
@@ -725,6 +726,7 @@ async def notify_movie(message: Message):
     date = movie["Дата_начало"]
     time = movie["Время_начало"]
     group_link = movie["Ссылка на группу"]
+    comment = movie["Комментарий"]
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -743,7 +745,8 @@ async def notify_movie(message: Message):
                     user_id,
                     f"🎬 Напоминаем: <b>Киновечер</b> состоится {date} в {time}!\n"
                     f"Присоединяйтесь к группе, если ещё нет, вся информация там! 👇\n\n"
-                    f"<b>P.S. Не забудьте свои карты для прохода в университет</b>",
+                    f"<b>P.S. Не забудьте свои карты для прохода в университет</b>"
+                    f"\n\n<b>{comment}</b>",
                     reply_markup=keyboard,
                     parse_mode="HTML"
                 )
@@ -1039,6 +1042,7 @@ async def notify_trip(message: Message):
     time_start = trip["Время_начало"]
     time_finish = trip["Время_конец"]
     place = trip["Место"]
+    comment = trip["Комментарий"]
     rows = trip_sheet.get_all_records()
     sent_count = 0
     keyboard = InlineKeyboardMarkup(
@@ -1069,6 +1073,7 @@ async def notify_trip(message: Message):
                     f"\n• Средства личной гигиены(в корпусах есть душевые)"
                     f"\n• При желаниии, можно брать с собой еду <i>без строгих условий хранения</i> (снеки)"
                     f"\n• Хорошее настроение!"
+                    f"\n\n<b>{comment}</b>"
                     f"\n\n<b><i>Ну так что, Ты с нами?</i></b>",
                     parse_mode="HTML",
                     reply_markup=keyboard
